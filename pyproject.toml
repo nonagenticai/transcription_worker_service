@@ -1,0 +1,134 @@
+[project]
+license = "Apache-2.0"
+name = "transcription-worker-service"
+version = "0.1.0"
+description = "GPU-capable Whisper transcription microservice with CPU fallback"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.118",
+    "uvicorn[standard]>=0.34",
+    "pydantic>=2.11",
+    "pydantic-settings>=2.14.2",  # GHSA-4xgf-cpjx-pc3j fixed in 2.14.2
+    "python-multipart>=0.0.27",
+    "faster-whisper>=1.1",
+    "openai-whisper>=20240930",
+    "torch>=2.5",
+    "numpy>=2.0",
+    "httpx>=0.28",
+    "prometheus-client>=0.21",
+    "redis>=7.3.0",
+    "w2v-common>=0.104.0",
+    # --- Security floor on a transitive dependency ---
+    # cryptography is not imported by this service directly; it arrives through
+    # httpx / redis and w2v-common. The lock resolves 50.0.0 today, but a lock is a point-in-time
+    # resolution, not a constraint: the next unrelated `uv lock` is free to walk
+    # an undeclared transitive back DOWN, silently, with green CI. The declared
+    # floor is the only thing that binds it.
+    #
+    # CVE-2026-69247 (GHSA-g6cj-pr64-35w5) was introduced in 44.0.0 and fixed in
+    # 50.0.0, so anything in [44.0.0, 50.0.0) is affected. Matches the floor
+    # analysis_service (#175/#176) records for the same CVE.
+    #
+    # No aiohttp floor here on purpose: this repo resolves no aiohttp at all
+    # (`grep -c 'name = "aiohttp"' uv.lock` -> 0). Only declare floors for
+    # packages the repo actually resolves.
+    "cryptography>=50.0.0",
+    # pyjwt: CVE-2026-101918 affects 2.14.0 (the previously-locked version) and
+    # is fixed in 2.15.1. Not imported directly; it arrives as a transitive of
+    # w2v-common (auth facade). Same lock-is-not-a-constraint reasoning as above.
+    "pyjwt>=2.15.1",
+    # urllib3: CVE-2026-97687 + CVE-2026-97688 + CVE-2026-97689 affect 2.7.0
+    # (the previously-locked version) and are fixed in 2.8.0. Not imported
+    # directly; it arrives as a transitive of `requests` and `w2v-common`.
+    "urllib3>=2.8.0",
+]
+
+[project.scripts]
+transcription-worker-service = "src.asgi:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "pytest-timeout>=2.4.0",
+    "ruff>=0.15.0",
+    "ty>=0.0.23",
+    "pip-audit>=2.10.0",
+    # PYSEC-2026-3721: pip <26.2 is vulnerable. pip arrives transitively via
+    # pip-audit -> pip-api; pin the floor so the audit step stays green.
+    "pip>=26.2",
+    "detect-secrets>=1.5.0",
+    "bandit>=1.9.4",
+]
+
+[tool.uv]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "I", "N", "W", "UP", "ANN", "B", "BLE", "A", "S", "C901",
+    "RUF", "RET", "SIM", "ASYNC", "PTH", "TID251",
+]
+ignore = [
+    "E501",
+    "B008",
+    "ASYNC240",
+    "ASYNC109"
+]
+
+# uuid7 is the id standard (stdlib, py3.14). TID251 bans `uuid4` in production
+# code via ruff — enforced in CI (`ruff check .`), not only local pre-commit.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"uuid.uuid4".msg = "uuid7 is the w2v id standard — use uuid.uuid7() (stdlib, py3.14)."
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "S104", "S105", "S106", "S107", "S108", "ANN", "PTH", "ASYNC110", "ASYNC230", "ASYNC240", "SIM115", "SIM117", "TID251"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+]
+
+[tool.coverage.report]
+fail_under = 95
+
+[tool.bandit]
+targets = ["src"]
+skips = ["B311"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.rules]
+unresolved-import = "error"
+unresolved-reference = "error"
+unresolved-attribute = "error"
+possibly-unresolved-reference = "error"
+possibly-missing-attribute = "error"
+missing-argument = "error"
+invalid-argument-type = "error"
+invalid-return-type = "error"
+
+[tool.uv.sources]
+# The published source tree resolves its shared library from the public
+# repository at the release tag; the private index is not reachable here.
+w2v-common = { git = "https://github.com/nonagenticai/w2v_common", tag = "v0.115.4" }
