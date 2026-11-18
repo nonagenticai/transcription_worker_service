@@ -109,7 +109,7 @@ class WhisperBackend(ABC):
         # tuple predicts (ImportError, OSError from a bad dylib, RuntimeError from
         # a runtime probe, library-specific subclasses). Anything narrower would
         # convert a previously-503-at-first-request into a dead launchd unit.
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Pre-importing the native module for backend=%s failed; it will be "
                 "imported lazily on a worker thread instead",
